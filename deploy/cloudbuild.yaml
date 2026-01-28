@@ -1,0 +1,51 @@
+steps:
+  # Build key-bringer (Cloud Run)
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "build"
+      - "-t"
+      - "gcr.io/$PROJECT_ID/key-bringer:$COMMIT_SHA"
+      - "-t"
+      - "gcr.io/$PROJECT_ID/key-bringer:latest"
+      - "-f"
+      - "deploy/Dockerfile"
+      - "."
+
+  # Push to Container Registry
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "gcr.io/$PROJECT_ID/key-bringer:$COMMIT_SHA"
+
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "gcr.io/$PROJECT_ID/key-bringer:latest"
+
+  # Deploy to Cloud Run
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: "gcloud"
+    args:
+      - "run"
+      - "deploy"
+      - "key-bringer"
+      - "--image"
+      - "gcr.io/$PROJECT_ID/key-bringer:$COMMIT_SHA"
+      - "--region"
+      - "us-central1"
+      - "--platform"
+      - "managed"
+      - "--allow-unauthenticated"
+      - "--service-account"
+      - "key-bringer-sa@$PROJECT_ID.iam.gserviceaccount.com"
+      - "--set-secrets"
+      - "AGENT_SECRET=agent-secret:latest,TOTP_SEED=totp-seed:latest,TELNYX_API_KEY=telnyx-api-key:latest,TELNYX_FROM_NUMBER=telnyx-from-number:latest,TELNYX_PUBLIC_KEY=telnyx-public-key:latest,ADMIN_PHONE=admin-phone:latest"
+      - "--set-env-vars"
+      - "GCP_PROJECT=$PROJECT_ID,ZFS_KEY_NAME=zfs-master-key"
+
+images:
+  - "gcr.io/$PROJECT_ID/key-bringer:$COMMIT_SHA"
+  - "gcr.io/$PROJECT_ID/key-bringer:latest"
+
+options:
+  logging: CLOUD_LOGGING_ONLY

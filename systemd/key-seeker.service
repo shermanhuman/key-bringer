@@ -1,0 +1,32 @@
+[Unit]
+Description=Key Seeker - ZFS Unlock Agent
+After=network-online.target
+Wants=network-online.target
+Before=zfs-mount.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# Load config from environment file
+EnvironmentFile=/etc/key-seeker/env
+
+# Run key-seeker in monitor mode
+ExecStart=/usr/local/bin/key-seeker --monitor
+
+# Retry on failure
+Restart=on-failure
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=false
+ProtectSystem=false
+ProtectHome=read-only
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=key-seeker
+
+[Install]
+WantedBy=multi-user.target
