@@ -30,6 +30,7 @@ You need to store 3 secrets:
 | ---------------- | ----------------------------------------------- |
 | `zfs-master-key` | The ZFS encryption passphrase                   |
 | `agent-secret`   | Shared secret for key-seeker → key-bringer auth |
+| `admin-phone`    | Your personal mobile number (E.164)             |
 | `totp-seed`      | Base32 TOTP seed for Google Authenticator       |
 
 ```bash
@@ -39,8 +40,11 @@ echo -n "your-zfs-passphrase" | gcloud secrets create zfs-master-key --data-file
 # Create the agent secret (generate a random one)
 openssl rand -base64 32 | gcloud secrets create agent-secret --data-file=-
 
+# Create admin phone number
+echo -n "+15550001234" | gcloud secrets create admin-phone --data-file=-
+
 # Create TOTP seed (for Google Authenticator)
-# Use a tool like `oathtool` or generate via https://totp.danhersam.com/
+# Use a tool like `oathtool` or generate via a secure method
 echo -n "JBSWY3DPEHPK3PXP" | gcloud secrets create totp-seed --data-file=-
 ```
 
@@ -119,7 +123,7 @@ gcloud run deploy key-bringer \
   --service-account key-bringer-sa@key-bringer-prod.iam.gserviceaccount.com \
   --region us-central1 \
   --allow-unauthenticated \
-  --set-secrets="AGENT_SECRET=agent-secret:latest,TOTP_SEED=totp-seed:latest,ZFS_KEY=zfs-master-key:latest,TELNYX_API_KEY=telnyx-api-key:latest,TELNYX_FROM_NUMBER=telnyx-from-number:latest,TELNYX_PUBLIC_KEY=telnyx-public-key:latest"
+  --set-secrets="AGENT_SECRET=agent-secret:latest,TOTP_SEED=totp-seed:latest,ZFS_KEY=zfs-master-key:latest,TELNYX_API_KEY=telnyx-api-key:latest,TELNYX_FROM_NUMBER=telnyx-from-number:latest,TELNYX_PUBLIC_KEY=telnyx-public-key:latest,ADMIN_PHONE=admin-phone:latest"
 ```
 
 ---
