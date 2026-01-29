@@ -192,7 +192,7 @@ Create `/etc/key-seeker/env`:
 
 ```ini
 SERVER_URL=https://key-bringer-xxxx.a.run.app
-MACHINE_ID=ny1
+MACHINE_ID=myserver
 AGENT_SECRET=<same-as-gcp-secret>
 ZFS_DATASET=zroot/encrypted
 ```
