@@ -1,6 +1,6 @@
 # Keybringer
 
-Secure, automated ZFS encryption at rest with secure offsite passphrase storage in Google Cloud secret manager and 2-way SMS and TOTP verification.  For those of us who don't want to get up at 3AM to ssh in.
+Secure, automated ZFS encryption at rest with secure offsite passphrase storage in Google Cloud secret manager and 2-way SMS and TOTP verification. For those of us who don't want to get up at 3AM to ssh in.
 
 ## Overview
 
@@ -152,6 +152,21 @@ gcloud run services add-iam-policy-binding key-bringer \
   --role="roles/run.invoker"
 ```
 
+### Rate Limiting (recommended)
+
+Limit to 1 instance and 1 concurrent request to cap costs:
+
+```bash
+gcloud run services update key-bringer \
+  --region=us-central1 \
+  --max-instances=1 \
+  --concurrency=1
+```
+
+### Billing Alert
+
+Set a $10 budget alert in Cloud Console: Billing → Budgets & alerts → Create Budget.
+
 **Update Telnyx webhook** with your Cloud Run URL + `/webhooks/telnyx`.
 
 ---
@@ -217,7 +232,7 @@ go build ./...
 
 # Status
 
-This is software is a barely tested proof of concept, so treat it as such.  If you aren't a fan of Telnyx or ZFS it shouldn't be to hard to add modules for other providers or maybe some other form of encryption.  I tried to keep concerns separated.
+This is software is a barely tested proof of concept, so treat it as such. If you aren't a fan of Telnyx or ZFS it shouldn't be to hard to add modules for other providers or maybe some other form of encryption. I tried to keep concerns separated.
 
 Right now it only accepts a single key from a single server and only sends to a single admin phone.
 
