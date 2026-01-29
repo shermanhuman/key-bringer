@@ -2,84 +2,91 @@
 
 Secure, automated ZFS unlocking via 2-way SMS and TOTP verification.
 
-## Overview
+## 1. Google Cloud Setup
 
-Key Bringer is a serverless solution for unlocking ZFS encrypted volumes at boot time. It consists of:
+### Create Project & Secrets
 
-- **key-bringer**: Cloud Run service that holds secrets and handles SMS verification
-- **key-seeker**: Host agent that requests keys and unlocks ZFS
+Create a project `key-bringer-prod` and enable **Secret Manager**, **Cloud Run**, and **Cloud Build** APIs.
 
-## Architecture
+Create these 7 secrets in **Secret Manager**:
 
-```
-┌─────────────────┐     HTTPS      ┌──────────────────┐
-│  Debian Server  │◄──────────────►│   Cloud Run      │
-│  (key-seeker)   │                │   (key-bringer)  │
-└────────┬────────┘                └────────┬─────────┘
-         │                                  │
-         │                                  │ SMS
-         │                                  ▼
-         │                         ┌────────────────┐
-         │                         │    Telnyx      │
-         │                         └───────┬────────┘
-         │                                 │
-         ▼                                 ▼
-   ZFS Encrypted                    Admin Phone
-     Volumes                     (TOTP Authenticator)
-```
+| Secret Name          | Value to Store                                  |
+| -------------------- | ----------------------------------------------- |
+| `zfs-master-key`     | Your actual ZFS encryption passphrase           |
+| `agent-secret`       | A long random password (shared with host agent) |
+| `totp-seed`          | Base32 TOTP seed (e.g. `JBSWY3DPEHPK3PXP`)      |
+| `telnyx-api-key`     | Telnyx V2 API Key (starts with `KEY...`)        |
+| `telnyx-from-number` | Your purchased Telnyx number (E.164: `+1...`)   |
+| `telnyx-public-key`  | Telnyx Ed25519 Public Key (for verification)    |
+| `admin-phone`        | Your personal mobile number (E.164: `+1...`)    |
 
-## Quick Start
+### Service Account
 
-### 1. Deploy key-bringer to Cloud Run
+Create a service account `key-bringer-sa` and grant it the **Secret Manager Secret Accessor** role.
 
-See [.plan/setup-guide.md](.plan/setup-guide.md) for GCP and Telnyx setup.
+## 2. Telnyx Setup
+
+1.  **Buy a Number**: Ensure it has SMS capabilities.
+2.  **Create Messaging Profile**:
+    - **Inbound**: Set Webhook URL to `https://<YOUR-CLOUD-RUN-URL>/webhooks/telnyx` (after deployment).
+    - **Allowed Destinations**: Check your country (e.g., United States).
+3.  **Associate Number**: Link your purchased number to this profile.
+
+## 3. Deploy Server
 
 ```bash
 gcloud builds submit --config deploy/cloudbuild.yaml
 ```
 
-### 2. Install key-seeker on Debian Host
+_Note the Service URL from the output and update your Telnyx Webhook._
 
-See [.plan/host-install.md](.plan/host-install.md) for detailed instructions.
+## 4. Install Host Agent (Debian)
+
+### Build
 
 ```bash
-# Copy binary
-scp bin/key-seeker-linux-amd64 server:/usr/local/bin/key-seeker
-
-# Configure
-ssh server
-sudo mkdir -p /etc/key-seeker
-sudo nano /etc/key-seeker/env
-
-# Install service
-sudo cp systemd/key-seeker.service /etc/systemd/system/
-sudo systemctl enable key-seeker
+# Cross-compile for Linux (run on local)
+GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/key-seeker ./cmd/key-seeker
+scp bin/key-seeker root@your-server:/usr/local/bin/
 ```
 
-### 3. Test
+### Configure
+
+On the server, create `/etc/key-seeker/env`:
+
+```ini
+SERVER_URL=https://<YOUR-CLOUD-RUN-URL>
+MACHINE_ID=ny1
+AGENT_SECRET=<value-from-gcp-secret-manager>
+ZFS_DATASET=zroot/encrypted
+```
+
+_Permissions: `chmod 600 /etc/key-seeker/env`_
+
+### Enable Service
+
+Copy `systemd/key-seeker.service` to `/etc/systemd/system/` and run:
 
 ```bash
-# Manual TOTP unlock
-key-seeker --totp 123456
+systemctl daemon-reload
+systemctl enable key-seeker
+```
 
-# Or via systemd (sends SMS)
-sudo systemctl start key-seeker
+## 5. Usage
+
+**Boot Time**: The service starts automatically, sends an SMS to `admin-phone`. Reply with your 6-digit TOTP code to unlock.
+
+**Manual Unlock**:
+
+```bash
+key-seeker --totp 123456
 ```
 
 ## Development
 
 ```bash
-# Run tests
 go test ./...
-
-# Build
-go build -o bin/key-bringer ./cmd/key-bringer
-go build -o bin/key-seeker ./cmd/key-seeker
-
-# Local server
-cp .env.example .env
-# Edit .env with test values
-go run ./cmd/key-bringer
+go build ./...
 ```
 
 ## License
