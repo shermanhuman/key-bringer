@@ -1,10 +1,10 @@
-# Key Bringer
+# Keybringer
 
-Secure, automated ZFS unlocking via 2-way SMS and TOTP verification.
+Secure, automated ZFS encryption at rest with secure offsite passphrase storage in Google Cloud secret manager and 2-way SMS and TOTP verification.  For those of us who don't want to get up at 3AM to ssh in.
 
 ## Overview
 
-Key Bringer is a serverless solution for unlocking ZFS encrypted volumes at boot time. It consists of:
+Keybringer is a serverless solution for unlocking ZFS encrypted volumes at boot time. It consists of:
 
 - **key-bringer**: Cloud Run service that holds secrets and handles SMS verification
 - **key-seeker**: Host agent that requests keys and unlocks ZFS
@@ -81,6 +81,12 @@ cp .env.example .env
 # Edit .env with test values
 go run ./cmd/key-bringer
 ```
+
+# Status
+
+This is software is a barely tested proof of concept, so treat it as such.  If you aren't a fan of Telnyx or ZFS it shouldn't be to hard to add modules for other providers or maybe some other form of encryption.  I tried to keep concerns separated.
+
+Right now it only accepts a single key from a single server and only sends to a single admin phone.
 
 ## License
 
