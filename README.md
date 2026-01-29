@@ -1,86 +1,199 @@
-# Key Bringer
+# KeyBringer
 
-Secure, automated ZFS unlocking via 2-way SMS and TOTP verification.
+Secure, automated ZFS unlocking via SMS + TOTP verification.
+
+## Architecture
+
+```
+┌─────────────────┐     HTTPS      ┌──────────────────┐
+│  Debian Server  │◄──────────────►│   Cloud Run      │
+│  (key-seeker)   │                │   (key-bringer)  │
+└────────┬────────┘                └────────┬─────────┘
+         │                                  │ SMS
+         ▼                                 ▼
+   ZFS Encrypted                    Admin Phone
+     Volumes                     (Authenticator App)
+```
+
+---
 
 ## 1. Google Cloud Setup
 
-### Create Project & Secrets
+### Create Project
 
-Create a project `key-bringer-prod` and enable **Secret Manager**, **Cloud Run**, and **Cloud Build** APIs.
+```bash
+gcloud projects create key-bringer --name="KeyBringer"
+gcloud config set project key-bringer
+```
 
-Create these 7 secrets in **Secret Manager**:
+### Link Billing
 
-| Secret Name          | Value to Store                                  |
-| -------------------- | ----------------------------------------------- |
-| `zfs-master-key`     | Your actual ZFS encryption passphrase           |
-| `agent-secret`       | A long random password (shared with host agent) |
-| `totp-seed`          | Base32 TOTP seed (e.g. `JBSWY3DPEHPK3PXP`)      |
-| `telnyx-api-key`     | Telnyx V2 API Key (starts with `KEY...`)        |
-| `telnyx-from-number` | Your purchased Telnyx number (E.164: `+1...`)   |
-| `telnyx-public-key`  | Telnyx Ed25519 Public Key (for verification)    |
-| `admin-phone`        | Your personal mobile number (E.164: `+1...`)    |
+In the [Cloud Console](https://console.cloud.google.com/), link a billing account to the project.
 
-### Service Account
+### Enable APIs
 
-Create a service account `key-bringer-sa` and grant it the **Secret Manager Secret Accessor** role.
+```bash
+gcloud services enable \
+  secretmanager.googleapis.com \
+  run.googleapis.com \
+  cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com
+```
+
+### Create Artifact Registry Repository
+
+```bash
+gcloud artifacts repositories create key-bringer \
+  --repository-format=docker \
+  --location=us-central1
+```
+
+### Create Service Account
+
+```bash
+gcloud iam service-accounts create key-bringer-sa \
+  --display-name="KeyBringer Service Account"
+
+gcloud projects add-iam-policy-binding key-bringer \
+  --member="serviceAccount:key-bringer-sa@key-bringer.iam.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
+### Grant Cloud Build Permissions
+
+Replace `PROJECT_NUMBER` with your project number (find via `gcloud projects describe key-bringer --format="value(projectNumber)"`):
+
+```bash
+# Artifact Registry
+gcloud projects add-iam-policy-binding key-bringer \
+  --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
+  --role="roles/artifactregistry.writer"
+
+# Cloud Run Admin
+gcloud projects add-iam-policy-binding key-bringer \
+  --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
+  --role="roles/run.admin"
+
+# Service Account User (to deploy as key-bringer-sa)
+gcloud iam service-accounts add-iam-policy-binding \
+  key-bringer-sa@key-bringer.iam.gserviceaccount.com \
+  --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
+  --role="roles/iam.serviceAccountUser"
+```
+
+### Create Secrets
+
+| Secret Name          | Value                                   |
+| -------------------- | --------------------------------------- |
+| `zfs-master-key`     | Your ZFS encryption passphrase          |
+| `agent-secret`       | Random password (share with host agent) |
+| `totp-seed`          | Base32 seed (add to Authenticator app)  |
+| `telnyx-api-key`     | Telnyx API Key (starts with `KEY...`)   |
+| `telnyx-from-number` | Your Telnyx number (`+1...`)            |
+| `telnyx-public-key`  | Telnyx Ed25519 Public Key               |
+| `admin-phone`        | Your mobile number (`+1...`)            |
+
+```bash
+echo -n "your-passphrase" | gcloud secrets create zfs-master-key --data-file=-
+echo -n "random-secret" | gcloud secrets create agent-secret --data-file=-
+echo -n "BASE32SEED" | gcloud secrets create totp-seed --data-file=-
+echo -n "KEY..." | gcloud secrets create telnyx-api-key --data-file=-
+echo -n "+15551234567" | gcloud secrets create telnyx-from-number --data-file=-
+echo -n "public-key" | gcloud secrets create telnyx-public-key --data-file=-
+echo -n "+15559876543" | gcloud secrets create admin-phone --data-file=-
+```
+
+**Add TOTP to your Authenticator app:**
+
+1. Open Google Authenticator / Authy / 1Password
+2. Add manual entry: Name=`KeyBringer`, Key=`<your totp-seed>`, Type=Time-based
+
+---
 
 ## 2. Telnyx Setup
 
-1.  **Buy a Number**: Ensure it has SMS capabilities.
-2.  **Create Messaging Profile**:
-    - **Inbound**: Set Webhook URL to `https://<YOUR-CLOUD-RUN-URL>/webhooks/telnyx` (after deployment).
-    - **Allowed Destinations**: Check your country (e.g., United States).
-3.  **Associate Number**: Link your purchased number to this profile.
+1. **Buy a Number**: [Telnyx Portal](https://portal.telnyx.com/) → Numbers → Search & Buy
+2. **Create Messaging Profile**:
+   - Go to Messaging → Programmable Messaging → Create Profile
+   - **Inbound**: Set Webhook URL to `https://<YOUR-CLOUD-RUN-URL>/webhooks/telnyx`
+   - **Allowed Destinations**: Check your country
+3. **Associate Number**: Link your number to the Messaging Profile
+4. **Get Credentials**:
+   - API Key: Account Settings → API Keys
+   - Public Key: Account Settings (for webhook verification)
 
-## 3. Deploy Server
+---
+
+## 3. Deploy
 
 ```bash
 gcloud builds submit --config deploy/cloudbuild.yaml
 ```
 
-_Note the Service URL from the output and update your Telnyx Webhook._
+After deployment, get your service URL:
+
+```bash
+gcloud run services describe key-bringer --region=us-central1 --format="value(status.url)"
+```
+
+Make it publicly accessible:
+
+```bash
+gcloud run services add-iam-policy-binding key-bringer \
+  --region=us-central1 \
+  --member="allUsers" \
+  --role="roles/run.invoker"
+```
+
+**Update Telnyx webhook** with your Cloud Run URL + `/webhooks/telnyx`.
+
+---
 
 ## 4. Install Host Agent (Debian)
 
 ### Build
 
 ```bash
-# Cross-compile for Linux (run on local)
 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/key-seeker ./cmd/key-seeker
 scp bin/key-seeker root@your-server:/usr/local/bin/
 ```
 
 ### Configure
 
-On the server, create `/etc/key-seeker/env`:
+Create `/etc/key-seeker/env`:
 
 ```ini
-SERVER_URL=https://<YOUR-CLOUD-RUN-URL>
+SERVER_URL=https://key-bringer-xxxx.a.run.app
 MACHINE_ID=ny1
-AGENT_SECRET=<value-from-gcp-secret-manager>
+AGENT_SECRET=<same-as-gcp-secret>
 ZFS_DATASET=zroot/encrypted
 ```
 
-_Permissions: `chmod 600 /etc/key-seeker/env`_
+```bash
+chmod 600 /etc/key-seeker/env
+```
 
 ### Enable Service
 
-Copy `systemd/key-seeker.service` to `/etc/systemd/system/` and run:
-
 ```bash
+cp systemd/key-seeker.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable key-seeker
 ```
 
+---
+
 ## 5. Usage
 
-**Boot Time**: The service starts automatically, sends an SMS to `admin-phone`. Reply with your 6-digit TOTP code to unlock.
+**Boot Time**: Service starts automatically, sends SMS. Reply with 6-digit TOTP code.
 
 **Manual Unlock**:
 
 ```bash
 key-seeker --totp 123456
 ```
+
+---
 
 ## Development
 
