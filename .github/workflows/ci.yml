@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Run unit tests
+        run: go test ./...
+
+      - name: Build binaries
+        run: |
+          go build -o bin/key-bringer ./cmd/key-bringer
+          go build -o bin/key-seeker ./cmd/key-seeker
+
+  e2e-zfs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Install ZFS
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zfsutils-linux
+          sudo modprobe zfs
+          zfs version
+
+      - name: Build key-seeker
+        run: go build -o bin/key-seeker ./cmd/key-seeker
+
+      - name: Run E2E ZFS test
+        run: |
+          chmod +x scripts/e2e-test.sh
+          sudo ./scripts/e2e-test.sh
+
+  build-docker:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build key-bringer image
+        run: docker build -f deploy/Dockerfile -t key-bringer:test .
+
+      - name: Build key-seeker image
+        run: docker build -f deploy/Dockerfile.seeker -t key-seeker:test .
