@@ -3,6 +3,7 @@ package totp
 import (
 	"time"
 
+	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 )
 
@@ -17,8 +18,15 @@ func NewVerifier(seed string) *Verifier {
 }
 
 // Validate checks if the provided 6-digit code is valid for the current time window.
+// Allows ±1 time window (90 seconds total) to handle minor clock drift.
 func (v *Verifier) Validate(code string) bool {
-	return totp.Validate(code, v.seed)
+	valid, _ := totp.ValidateCustom(code, v.seed, time.Now(), totp.ValidateOpts{
+		Period:    30,
+		Skew:      1, // Allow 1 period before/after
+		Digits:    6,
+		Algorithm: otp.AlgorithmSHA1,
+	})
+	return valid
 }
 
 // ValidateWithTime checks if the code is valid at a specific time (for testing).

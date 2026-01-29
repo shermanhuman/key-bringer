@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"google.golang.org/api/idtoken"
 )
 
 func main() {
@@ -53,14 +55,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	ctx := context.Background()
+
+	// Create HTTP client with Google Cloud authentication
+	httpClient, err := idtoken.NewClient(ctx, serverURL)
+	if err != nil {
+		logger.Warn("failed to create authenticated client, using unauthenticated", "error", err)
+		httpClient = &http.Client{Timeout: 30 * time.Second}
+	}
+
 	client := &Client{
 		serverURL:   serverURL,
 		agentSecret: agentSecret,
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		httpClient:  httpClient,
 		logger:      logger,
 	}
-
-	ctx := context.Background()
 
 	// Mode 1: Immediate unlock with TOTP
 	if totpCode != "" {
@@ -124,18 +133,24 @@ func (c *Client) UnlockWithTOTP(ctx context.Context, machineID, totpCode string)
 	if err != nil {
 		return "", err
 	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode == http.StatusForbidden {
-		return "", fmt.Errorf("invalid TOTP code")
+		return "", fmt.Errorf("invalid TOTP code (server: %s)", string(respBody))
+	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		return "", fmt.Errorf("authentication failed - check AGENT_SECRET (server: %s)", string(respBody))
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("server returned %d", resp.StatusCode)
+		return "", fmt.Errorf("server returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {
 		Secret string `json:"secret"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(respBody, &result); err != nil {
 		return "", fmt.Errorf("failed to decode response: %w", err)
 	}
 
