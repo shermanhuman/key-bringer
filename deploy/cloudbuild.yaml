@@ -4,19 +4,12 @@ steps:
     args:
       - "build"
       - "-t"
-      - "gcr.io/$PROJECT_ID/key-bringer:$COMMIT_SHA"
-      - "-t"
       - "gcr.io/$PROJECT_ID/key-bringer:latest"
       - "-f"
       - "deploy/Dockerfile"
       - "."
 
   # Push to Container Registry
-  - name: "gcr.io/cloud-builders/docker"
-    args:
-      - "push"
-      - "gcr.io/$PROJECT_ID/key-bringer:$COMMIT_SHA"
-
   - name: "gcr.io/cloud-builders/docker"
     args:
       - "push"
@@ -30,7 +23,7 @@ steps:
       - "deploy"
       - "key-bringer"
       - "--image"
-      - "gcr.io/$PROJECT_ID/key-bringer:$COMMIT_SHA"
+      - "gcr.io/$PROJECT_ID/key-bringer:latest"
       - "--region"
       - "us-central1"
       - "--platform"
@@ -44,7 +37,6 @@ steps:
       - "GCP_PROJECT=$PROJECT_ID,ZFS_KEY_NAME=zfs-master-key"
 
 images:
-  - "gcr.io/$PROJECT_ID/key-bringer:$COMMIT_SHA"
   - "gcr.io/$PROJECT_ID/key-bringer:latest"
 
 options:
