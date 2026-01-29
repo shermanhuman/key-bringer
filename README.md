@@ -149,13 +149,19 @@ gcloud run services add-iam-policy-binding key-bringer \
 
 ---
 
-## 4. Install Host Agent (Debian)
+## 4. Install key-seeker (Host Agent)
 
-### Build
+The `key-seeker` binary is cross-compiled on your development machine and copied to the Debian server. No Go installation required on the server.
+
+### Build (on your dev machine)
 
 ```bash
+# From the key-bringer repo directory
 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/key-seeker ./cmd/key-seeker
+
+# Copy to server
 scp bin/key-seeker root@your-server:/usr/local/bin/
+chmod +x /usr/local/bin/key-seeker
 ```
 
 ### Configure
