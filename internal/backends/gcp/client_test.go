@@ -1,4 +1,4 @@
-package gsm
+package gcp
 
 import (
 	"context"

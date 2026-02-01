@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/Applesauce-Labs/key-bringer/internal/gsm"
+	"github.com/Applesauce-Labs/key-bringer/internal/backends/gcp"
+	"github.com/Applesauce-Labs/key-bringer/internal/notifiers/telnyx"
 	"github.com/Applesauce-Labs/key-bringer/internal/server"
-	"github.com/Applesauce-Labs/key-bringer/internal/telnyx"
 	"github.com/Applesauce-Labs/key-bringer/internal/totp"
 	"github.com/joho/godotenv"
 )
@@ -57,7 +57,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	secretStore, err := gsm.NewClient(ctx, gcpProject)
+	secretStore, err := gcp.NewClient(ctx, gcpProject)
 	if err != nil {
 		logger.Error("failed to create secret store", "error", err)
 		os.Exit(1)

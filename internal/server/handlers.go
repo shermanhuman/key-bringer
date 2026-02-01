@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/Applesauce-Labs/key-bringer/internal/core"
-	"github.com/Applesauce-Labs/key-bringer/internal/telnyx"
+	"github.com/Applesauce-Labs/key-bringer/internal/notifiers/telnyx"
 	"github.com/gin-gonic/gin"
 )
 
