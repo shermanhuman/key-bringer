@@ -7,6 +7,7 @@ description: Go development guidelines for key-bringer project
 ## Stack
 
 - **Go**: 1.25.6 (latest stable, Jan 2026)
+- **CLI**: `github.com/spf13/cobra` (for `key-bringer` and `key-seeker`)
 - **HTTP**: `github.com/gin-gonic/gin` v1.10+
 - **TOTP**: `github.com/pquerna/otp` v1.4+
 - **GCP**: `cloud.google.com/go/secretmanager` v1.14+
@@ -54,6 +55,13 @@ deploy/        # Dockerfile, cloudbuild.yaml
 - Validate all inputs
 - Use `crypto/ed25519` for Telnyx webhook signature verification
 - Check timestamp to prevent replay attacks (reject > 5 min old)
+
+Opinionated defaults (v1):
+
+- Cloud Run is private-by-default (IAM-authenticated). Avoid `allUsers`.
+- Avoid user-managed service account keys in files/repos.
+- Secret Manager usage is deterministic: prefer pinned numeric secret versions (avoid `latest`).
+- No Redis / external DB required for v1; keep unlock session state in-memory and run with a single Cloud Run instance.
 
 ## Commands
 
