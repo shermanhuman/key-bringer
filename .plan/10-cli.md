@@ -13,6 +13,11 @@ Adopt Cobra for both binaries:
 - `key-bringer` (admin/operator CLI + server runner)
 - `key-seeker` (host agent CLI)
 
+Config approach:
+
+- Cobra only; no Viper.
+- Repo config (if used) is parsed directly from YAML into structs and fails closed on unknown fields.
+
 ## Proposed commands (v1)
 
 ### key-bringer

@@ -14,6 +14,14 @@ description: Go development guidelines for key-bringer project
 - **Telnyx**: `github.com/team-telnyx/telnyx-go` v3+
 - **Env**: `github.com/joho/godotenv` v1.5+
 
+Config parsing (opinionated):
+
+- Use Cobra for flags/commands.
+- Do not use Viper.
+  - Rationale: keep dependency surface small and behavior explicit.
+- If/when we add repo config (`.keybringer/config.yaml`), parse it directly using `sigs.k8s.io/yaml` into Go structs.
+- Fail closed on unknown fields.
+
 ## Local Development
 
 Use `.env` for local environment variables (loaded by `godotenv`):
