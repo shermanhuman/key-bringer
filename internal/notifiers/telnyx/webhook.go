@@ -1,6 +1,7 @@
 package telnyx
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
@@ -11,9 +12,9 @@ import (
 
 const (
 	// SignatureHeader is the HTTP header containing the ED25519 signature.
-	SignatureHeader = "Telnyx-Signature-Ed25519"
+	SignatureHeader = "telnyx-signature-ed25519"
 	// TimestampHeader is the HTTP header containing the Unix timestamp.
-	TimestampHeader = "Telnyx-Timestamp"
+	TimestampHeader = "telnyx-timestamp"
 	// MaxTimestampAge is the maximum age of a webhook before it's rejected.
 	MaxTimestampAge = 5 * time.Minute
 )
@@ -58,8 +59,9 @@ func (v *WebhookVerifier) Verify(r *http.Request, body []byte) error {
 	}
 
 	webhookTime := time.Unix(timestamp, 0)
-	if time.Since(webhookTime) > MaxTimestampAge {
-		return fmt.Errorf("telnyx: webhook timestamp too old (age: %v)", time.Since(webhookTime))
+	age := time.Since(webhookTime)
+	if age > MaxTimestampAge {
+		return fmt.Errorf("telnyx: webhook timestamp too old")
 	}
 
 	// Decode signature
@@ -68,11 +70,15 @@ func (v *WebhookVerifier) Verify(r *http.Request, body []byte) error {
 		return fmt.Errorf("telnyx: invalid signature encoding: %w", err)
 	}
 
-	// Build the signed payload: timestamp.payload
-	signedPayload := []byte(timestampStr + "." + string(body))
+	// Build the signed payload: ${timestamp}|${raw_body}
+	var signedPayload bytes.Buffer
+	signedPayload.Grow(len(timestampStr) + 1 + len(body))
+	signedPayload.WriteString(timestampStr)
+	signedPayload.WriteByte('|')
+	signedPayload.Write(body)
 
 	// Verify signature
-	if !ed25519.Verify(v.publicKey, signedPayload, sigBytes) {
+	if !ed25519.Verify(v.publicKey, signedPayload.Bytes(), sigBytes) {
 		return fmt.Errorf("telnyx: invalid signature")
 	}
 

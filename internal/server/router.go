@@ -13,6 +13,7 @@ type Config struct {
 	AgentSecret string
 	AdminPhone  string
 	ZFSKeyName  string
+	PublicURL   string
 }
 
 // NewRouter creates a new Gin router with all routes configured.
@@ -20,6 +21,7 @@ func NewRouter(
 	cfg Config,
 	verifier core.Verifier,
 	notifier core.Notifier,
+	webhookURLUpdater core.WebhookURLUpdater,
 	secretStore core.SecretStore,
 	webhookVerifier *telnyx.WebhookVerifier,
 	logger *slog.Logger,
@@ -31,10 +33,12 @@ func NewRouter(
 	handler := NewHandler(
 		verifier,
 		notifier,
+		webhookURLUpdater,
 		secretStore,
 		webhookVerifier,
 		cfg.AdminPhone,
 		cfg.ZFSKeyName,
+		cfg.PublicURL,
 		logger,
 	)
 
@@ -47,7 +51,10 @@ func NewRouter(
 	}
 
 	// Webhook routes (authenticated via signature)
-	r.POST("/webhooks/telnyx", handler.HandleWebhook)
+	r.GET("/webhooks/telnyx/:token", handler.HandleWebhookProbe)
+	r.POST("/webhooks/telnyx/:token", handler.HandleWebhookTokenized)
+	// Legacy un-tokenized route (kept for initial bring-up; rejected once token rotation is active)
+	r.POST("/webhooks/telnyx", handler.HandleWebhookLegacy)
 
 	// Health check
 	r.GET("/health", func(c *gin.Context) {

@@ -27,7 +27,7 @@ func TestValidSignature(t *testing.T) {
 	// Create a valid signed payload
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 	body := []byte(`{"data":{"payload":{"from":"+15551234567","text":"123456"}}}`)
-	signedPayload := []byte(timestamp + "." + string(body))
+	signedPayload := append(append([]byte(timestamp), '|'), body...)
 	signature := ed25519.Sign(priv, signedPayload)
 	sigBase64 := base64.StdEncoding.EncodeToString(signature)
 
@@ -54,7 +54,7 @@ func TestTamperedPayload(t *testing.T) {
 	// Sign original payload
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 	originalBody := []byte(`{"data":"original"}`)
-	signedPayload := []byte(timestamp + "." + string(originalBody))
+	signedPayload := append(append([]byte(timestamp), '|'), originalBody...)
 	signature := ed25519.Sign(priv, signedPayload)
 	sigBase64 := base64.StdEncoding.EncodeToString(signature)
 
@@ -84,7 +84,7 @@ func TestOldTimestamp(t *testing.T) {
 	oldTime := time.Now().Add(-10 * time.Minute)
 	timestamp := strconv.FormatInt(oldTime.Unix(), 10)
 	body := []byte(`{"data":"test"}`)
-	signedPayload := []byte(timestamp + "." + string(body))
+	signedPayload := append(append([]byte(timestamp), '|'), body...)
 	signature := ed25519.Sign(priv, signedPayload)
 	sigBase64 := base64.StdEncoding.EncodeToString(signature)
 

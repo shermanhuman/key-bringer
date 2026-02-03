@@ -39,16 +39,27 @@ func main() {
 	telnyxAPIKey := os.Getenv("TELNYX_API_KEY")
 	telnyxFromNumber := os.Getenv("TELNYX_FROM_NUMBER")
 	telnyxPublicKey := os.Getenv("TELNYX_PUBLIC_KEY")
+	telnyxMessagingProfileID := os.Getenv("TELNYX_MESSAGING_PROFILE_ID")
 	adminPhone := os.Getenv("ADMIN_PHONE")
 	gcpProject := os.Getenv("GCP_PROJECT")
+	publicURL := os.Getenv("PUBLIC_URL")
 	zfsKeyName := os.Getenv("ZFS_KEY_NAME")
 	if zfsKeyName == "" {
 		zfsKeyName = "zfs-master-key"
 	}
 
+	if telnyxMessagingProfileID == "" {
+		logger.Error("TELNYX_MESSAGING_PROFILE_ID is required")
+		os.Exit(1)
+	}
+	if publicURL == "" {
+		logger.Error("PUBLIC_URL is required")
+		os.Exit(1)
+	}
+
 	// Create dependencies
 	verifier := totp.NewVerifier(totpSeed)
-	notifier := telnyx.NewClient(telnyxAPIKey, telnyxFromNumber)
+	telnyxClient := telnyx.NewClient(telnyxAPIKey, telnyxFromNumber, telnyxMessagingProfileID)
 
 	webhookVerifier, err := telnyx.NewWebhookVerifier(telnyxPublicKey)
 	if err != nil {
@@ -69,9 +80,10 @@ func main() {
 		AgentSecret: agentSecret,
 		AdminPhone:  adminPhone,
 		ZFSKeyName:  zfsKeyName,
+		PublicURL:   publicURL,
 	}
 
-	router := server.NewRouter(cfg, verifier, notifier, secretStore, webhookVerifier, logger)
+	router := server.NewRouter(cfg, verifier, telnyxClient, telnyxClient, secretStore, webhookVerifier, logger)
 
 	// Start server
 	logger.Info("starting key-bringer", "port", port)
