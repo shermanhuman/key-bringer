@@ -15,7 +15,6 @@ import (
 
 	"github.com/Applesauce-Labs/key-bringer/internal/core"
 	"github.com/Applesauce-Labs/key-bringer/internal/notifiers/telnyx"
-	"github.com/gin-gonic/gin"
 )
 
 // Session represents a pending unlock request.
@@ -140,7 +139,7 @@ func (h *Handler) rotateWebhookToken(ctx context.Context) (string, error) {
 
 	webhookURL := h.publicURL + "/webhooks/telnyx/" + newToken
 
-	// Update Telnyx messaging profile webhook URL.
+	// Update provider messaging profile webhook URL.
 	if err := h.webhookUpdater.UpdateMessagingProfileWebhookURL(ctx, webhookURL); err != nil {
 		// Revert staged token state.
 		h.mu.Lock()
@@ -148,7 +147,8 @@ func (h *Handler) rotateWebhookToken(ctx context.Context) (string, error) {
 		h.webhookTokenPrevious = oldPrevious
 		h.webhookTokenPreviousValidTil = oldPrevTil
 		h.mu.Unlock()
-		return "", err
+		// Do not return the underlying error; it may include the URL/token.
+		return "", fmt.Errorf("provider webhook update failed")
 	}
 
 	// Probe the new endpoint is reachable.
@@ -186,34 +186,41 @@ func (h *Handler) rotateWebhookToken(ctx context.Context) (string, error) {
 
 // UnlockRequest is the request body for POST /api/v1/unlock.
 type UnlockRequest struct {
-	MachineID string `json:"machine_id" binding:"required"`
+	MachineID string `json:"machine_id"`
 	TOTPCode  string `json:"totp_code"`
 }
 
 // HandleUnlock handles POST /api/v1/unlock.
-func (h *Handler) HandleUnlock(c *gin.Context) {
+
+func (h *Handler) HandleUnlock(w http.ResponseWriter, r *http.Request) {
 	var req UnlockRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if strings.TrimSpace(req.MachineID) == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "machine_id is required"})
 		return
 	}
 
 	// If TOTP provided, verify immediately
 	if req.TOTPCode != "" {
 		if !h.verifier.Validate(req.TOTPCode) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "invalid TOTP code"})
+			WriteJSON(w, http.StatusForbidden, map[string]string{"error": "invalid TOTP code"})
 			return
 		}
 
 		// Get and return the secret
-		secret, err := h.secretStore.GetSecret(c.Request.Context(), h.zfsKeyName)
+		secret, err := h.secretStore.GetSecret(r.Context(), h.zfsKeyName)
 		if err != nil {
 			h.logger.Error("failed to get secret", "error", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve secret"})
+			WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to retrieve secret"})
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"secret": secret})
+		WriteJSON(w, http.StatusOK, map[string]string{"secret": secret})
 		return
 	}
 
@@ -230,35 +237,42 @@ func (h *Handler) HandleUnlock(c *gin.Context) {
 	h.mu.Unlock()
 
 	// Rotate webhook token BEFORE sending the SMS challenge (fail closed).
-	if _, err := h.rotateWebhookToken(c.Request.Context()); err != nil {
+	if _, err := h.rotateWebhookToken(r.Context()); err != nil {
 		h.logger.Error("failed to rotate webhook token", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare webhook"})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to prepare webhook"})
 		return
 	}
 
 	// Send SMS challenge
 	message := "Key-Bringer unlock request for " + req.MachineID + ". Reply with: APPROVE " + req.MachineID + " <6-digit-code>"
-	if err := h.notifier.SendSMS(c.Request.Context(), h.adminPhone, message); err != nil {
+	if err := h.notifier.SendSMS(r.Context(), h.adminPhone, message); err != nil {
 		h.logger.Error("failed to send SMS", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send SMS"})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to send SMS"})
 		return
 	}
 
 	h.logger.Info("unlock request created", "machine_id", req.MachineID, "session_id", sessionID)
-	c.JSON(http.StatusAccepted, gin.H{"session_id": sessionID})
+	WriteJSON(w, http.StatusAccepted, map[string]string{"session_id": sessionID})
 }
 
 // PollRequest is the request body for POST /api/v1/poll.
 type PollRequest struct {
-	MachineID string `json:"machine_id" binding:"required"`
-	SessionID string `json:"session_id" binding:"required"`
+	MachineID string `json:"machine_id"`
+	SessionID string `json:"session_id"`
 }
 
 // HandlePoll handles POST /api/v1/poll.
-func (h *Handler) HandlePoll(c *gin.Context) {
+
+func (h *Handler) HandlePoll(w http.ResponseWriter, r *http.Request) {
 	var req PollRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if strings.TrimSpace(req.SessionID) == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "session_id is required"})
 		return
 	}
 
@@ -267,7 +281,7 @@ func (h *Handler) HandlePoll(c *gin.Context) {
 	h.mu.RUnlock()
 
 	if !exists {
-		c.JSON(http.StatusGone, gin.H{"error": "session expired or not found"})
+		WriteJSON(w, http.StatusGone, map[string]string{"error": "session expired or not found"})
 		return
 	}
 
@@ -276,20 +290,20 @@ func (h *Handler) HandlePoll(c *gin.Context) {
 		h.mu.Lock()
 		delete(h.sessions, req.SessionID)
 		h.mu.Unlock()
-		c.JSON(http.StatusGone, gin.H{"error": "session expired"})
+		WriteJSON(w, http.StatusGone, map[string]string{"error": "session expired"})
 		return
 	}
 
 	if !session.Approved {
-		c.JSON(http.StatusAccepted, gin.H{"status": "pending"})
+		WriteJSON(w, http.StatusAccepted, map[string]string{"status": "pending"})
 		return
 	}
 
 	// Session approved - fetch secret at deliver time and clean up
-	secret, err := h.secretStore.GetSecret(c.Request.Context(), h.zfsKeyName)
+	secret, err := h.secretStore.GetSecret(r.Context(), h.zfsKeyName)
 	if err != nil {
 		h.logger.Error("failed to get secret for approved session", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve secret"})
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to retrieve secret"})
 		return
 	}
 
@@ -297,51 +311,55 @@ func (h *Handler) HandlePoll(c *gin.Context) {
 	delete(h.sessions, req.SessionID)
 	h.mu.Unlock()
 
-	c.JSON(http.StatusOK, gin.H{"secret": secret})
+	WriteJSON(w, http.StatusOK, map[string]string{"secret": secret})
 }
 
 // HandleWebhookProbe responds quickly for reachability checks.
 // Returns 204 only if token is valid; otherwise 404.
-func (h *Handler) HandleWebhookProbe(c *gin.Context) {
-	token := c.Param("token")
+
+func (h *Handler) HandleWebhookProbe(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
 	if !h.isValidWebhookToken(token, time.Now()) {
-		c.Status(http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	c.Status(http.StatusNoContent)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // HandleWebhookTokenized handles POST /webhooks/telnyx/:token.
-func (h *Handler) HandleWebhookTokenized(c *gin.Context) {
-	token := c.Param("token")
+
+func (h *Handler) HandleWebhookTokenized(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
 	if !h.isValidWebhookToken(token, time.Now()) {
-		c.Status(http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	h.handleWebhookCommon(c)
+	h.handleWebhookCommon(w, r)
 }
 
 // HandleWebhookLegacy handles POST /webhooks/telnyx.
 // Once token rotation has started, this endpoint is disabled to reduce attack surface.
-func (h *Handler) HandleWebhookLegacy(c *gin.Context) {
+
+func (h *Handler) HandleWebhookLegacy(w http.ResponseWriter, r *http.Request) {
 	if h.hasActiveWebhookToken() {
-		c.Status(http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	h.handleWebhookCommon(c)
+	h.handleWebhookCommon(w, r)
 }
 
-func (h *Handler) handleWebhookCommon(c *gin.Context) {
+
+func (h *Handler) handleWebhookCommon(w http.ResponseWriter, r *http.Request) {
 	// Read raw body for signature verification.
-	body, err := io.ReadAll(c.Request.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read body"})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
 		return
 	}
 
-	if err := h.webhookVerifier.Verify(c.Request, body); err != nil {
+	if err := h.webhookVerifier.Verify(r, body); err != nil {
 		h.logger.Warn("webhook signature verification failed", "error", err)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature"})
+		WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid signature"})
 		return
 	}
 
@@ -358,7 +376,7 @@ func (h *Handler) handleWebhookCommon(c *gin.Context) {
 	}
 
 	if err := json.Unmarshal(body, &payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
 		return
 	}
 
@@ -377,7 +395,7 @@ func (h *Handler) handleWebhookCommon(c *gin.Context) {
 		}
 		if _, ok := h.seenEventIDs[eventID]; ok {
 			h.mu.Unlock()
-			c.JSON(http.StatusOK, gin.H{"status": "duplicate"})
+			WriteJSON(w, http.StatusOK, map[string]string{"status": "duplicate"})
 			return
 		}
 		h.seenEventIDs[eventID] = now
@@ -387,13 +405,13 @@ func (h *Handler) handleWebhookCommon(c *gin.Context) {
 	if from != h.adminPhone {
 		// Acknowledge quickly; do not leak details.
 		h.logger.Warn("webhook from non-admin phone", "from", from)
-		c.JSON(http.StatusOK, gin.H{"status": "ignored"})
+		WriteJSON(w, http.StatusOK, map[string]string{"status": "ignored"})
 		return
 	}
 
 	fields := strings.Fields(text)
 	if len(fields) < 3 || !strings.EqualFold(fields[0], "APPROVE") {
-		c.JSON(http.StatusOK, gin.H{"status": "ignored"})
+		WriteJSON(w, http.StatusOK, map[string]string{"status": "ignored"})
 		return
 	}
 
@@ -404,7 +422,7 @@ func (h *Handler) handleWebhookCommon(c *gin.Context) {
 
 	if !h.verifier.Validate(code) {
 		h.logger.Warn("invalid TOTP code received via SMS", "from", from, "machine_id", machineID)
-		c.JSON(http.StatusOK, gin.H{"status": "invalid code"})
+		WriteJSON(w, http.StatusOK, map[string]string{"status": "invalid code"})
 		return
 	}
 
@@ -436,5 +454,5 @@ func (h *Handler) handleWebhookCommon(c *gin.Context) {
 	}
 	h.mu.Unlock()
 
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

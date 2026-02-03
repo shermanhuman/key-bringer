@@ -2,10 +2,10 @@ package server
 
 import (
 	"log/slog"
+	"net/http"
 
 	"github.com/Applesauce-Labs/key-bringer/internal/core"
 	"github.com/Applesauce-Labs/key-bringer/internal/notifiers/telnyx"
-	"github.com/gin-gonic/gin"
 )
 
 // Config holds server configuration.
@@ -16,7 +16,7 @@ type Config struct {
 	PublicURL   string
 }
 
-// NewRouter creates a new Gin router with all routes configured.
+// NewRouter creates a new stdlib router with all routes configured.
 func NewRouter(
 	cfg Config,
 	verifier core.Verifier,
@@ -25,10 +25,8 @@ func NewRouter(
 	secretStore core.SecretStore,
 	webhookVerifier *telnyx.WebhookVerifier,
 	logger *slog.Logger,
-) *gin.Engine {
-	gin.SetMode(gin.ReleaseMode)
-	r := gin.New()
-	r.Use(gin.Recovery())
+) http.Handler {
+	mux := http.NewServeMux()
 
 	handler := NewHandler(
 		verifier,
@@ -43,23 +41,22 @@ func NewRouter(
 	)
 
 	// API routes (require agent auth)
-	api := r.Group("/api/v1")
-	api.Use(AuthMiddleware(cfg.AgentSecret))
-	{
-		api.POST("/unlock", handler.HandleUnlock)
-		api.POST("/poll", handler.HandlePoll)
-	}
+	mux.Handle("POST /api/v1/unlock", AuthMiddleware(cfg.AgentSecret, http.HandlerFunc(handler.HandleUnlock)))
+	mux.Handle("POST /api/v1/poll", AuthMiddleware(cfg.AgentSecret, http.HandlerFunc(handler.HandlePoll)))
 
 	// Webhook routes (authenticated via signature)
-	r.GET("/webhooks/telnyx/:token", handler.HandleWebhookProbe)
-	r.POST("/webhooks/telnyx/:token", handler.HandleWebhookTokenized)
+	mux.HandleFunc("GET /webhooks/telnyx/{token}", handler.HandleWebhookProbe)
+	mux.HandleFunc("POST /webhooks/telnyx/{token}", handler.HandleWebhookTokenized)
 	// Legacy un-tokenized route (kept for initial bring-up; rejected once token rotation is active)
-	r.POST("/webhooks/telnyx", handler.HandleWebhookLegacy)
+	mux.HandleFunc("POST /webhooks/telnyx", handler.HandleWebhookLegacy)
 
 	// Health check
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ok"})
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	return r
+	return mux
 }

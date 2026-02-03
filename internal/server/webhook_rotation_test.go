@@ -11,7 +11,6 @@ import (
 
 	"github.com/Applesauce-Labs/key-bringer/internal/core"
 	"github.com/Applesauce-Labs/key-bringer/internal/notifiers/telnyx"
-	"github.com/gin-gonic/gin"
 )
 
 type fakeVerifier struct{}
@@ -39,8 +38,6 @@ func (f *fakeWebhookUpdater) UpdateMessagingProfileWebhookURL(ctx context.Contex
 }
 
 func TestWebhookTokenRotationOverlap(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	updater := &fakeWebhookUpdater{}
 
@@ -57,11 +54,11 @@ func TestWebhookTokenRotationOverlap(t *testing.T) {
 		logger,
 	)
 
-	r := gin.New()
-	r.GET("/webhooks/telnyx/:token", h.HandleWebhookProbe)
-	r.POST("/webhooks/telnyx", h.HandleWebhookLegacy)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /webhooks/telnyx/{token}", h.HandleWebhookProbe)
+	mux.HandleFunc("POST /webhooks/telnyx", h.HandleWebhookLegacy)
 
-	srv := httptest.NewServer(r)
+	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
 	h.publicURL = srv.URL
@@ -90,7 +87,7 @@ func TestWebhookTokenRotationOverlap(t *testing.T) {
 	// previous token should still be valid initially
 	wPrev := httptest.NewRecorder()
 	reqPrev := httptest.NewRequest(http.MethodGet, "/webhooks/telnyx/"+first, nil)
-	r.ServeHTTP(wPrev, reqPrev)
+	mux.ServeHTTP(wPrev, reqPrev)
 	if wPrev.Code != http.StatusNoContent {
 		t.Fatalf("expected 204 for previous token in grace, got %d", wPrev.Code)
 	}
@@ -102,7 +99,7 @@ func TestWebhookTokenRotationOverlap(t *testing.T) {
 
 	wPrevExpired := httptest.NewRecorder()
 	reqPrevExpired := httptest.NewRequest(http.MethodGet, "/webhooks/telnyx/"+first, nil)
-	r.ServeHTTP(wPrevExpired, reqPrevExpired)
+	mux.ServeHTTP(wPrevExpired, reqPrevExpired)
 	if wPrevExpired.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for expired previous token, got %d", wPrevExpired.Code)
 	}
@@ -110,7 +107,7 @@ func TestWebhookTokenRotationOverlap(t *testing.T) {
 	// legacy endpoint should be disabled once token rotation is active
 	wLegacy := httptest.NewRecorder()
 	reqLegacy := httptest.NewRequest(http.MethodPost, "/webhooks/telnyx", nil)
-	r.ServeHTTP(wLegacy, reqLegacy)
+	mux.ServeHTTP(wLegacy, reqLegacy)
 	if wLegacy.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for legacy webhook once token active, got %d", wLegacy.Code)
 	}

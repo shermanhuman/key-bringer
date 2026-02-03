@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
+	"time"
 
 	"github.com/Applesauce-Labs/key-bringer/internal/backends/gcp"
 	"github.com/Applesauce-Labs/key-bringer/internal/notifiers/telnyx"
@@ -83,11 +85,19 @@ func main() {
 		PublicURL:   publicURL,
 	}
 
-	router := server.NewRouter(cfg, verifier, telnyxClient, telnyxClient, secretStore, webhookVerifier, logger)
+	h := server.NewRouter(cfg, verifier, telnyxClient, telnyxClient, secretStore, webhookVerifier, logger)
 
-	// Start server
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           h,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
 	logger.Info("starting key-bringer", "port", port)
-	if err := router.Run(":" + port); err != nil {
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Error("server failed", "error", err)
 		os.Exit(1)
 	}
