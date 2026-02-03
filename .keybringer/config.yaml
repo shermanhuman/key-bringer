@@ -1,0 +1,50 @@
+# KeyBringer v1 config (committed; no secret values)
+# All secrets are references to Google Secret Manager by pinned numeric version.
+
+version: 1
+
+gcp:
+  projectId: YOUR_GCP_PROJECT_ID
+  region: us-central1
+
+runtime:
+  requireIamAuth: true
+  maxPendingMinutes: 10
+  # Audience should match the Cloud Run service URL (or custom audience if configured).
+  iamAudience: https://key-bringer-xxxxx-uc.a.run.app
+
+http:
+  publicURL: https://key-bringer-xxxxx-uc.a.run.app
+
+# Provider/non-secret config
+
+telnyx:
+  messagingProfileId: YOUR_TELNYX_MESSAGING_PROFILE_ID
+
+secrets:
+  zfsMasterKey:
+    secretId: zfs-master-key
+    version: 1
+  totpSeed:
+    secretId: totp-seed
+    version: 1
+  # Optional defense-in-depth; leave unset if you don't want a host-held secret.
+  # agentSecret:
+  #   secretId: agent-secret
+  #   version: 1
+  telnyxApiKey:
+    secretId: telnyx-api-key
+    version: 1
+  telnyxFromNumber:
+    secretId: telnyx-from-number
+    version: 1
+  telnyxPublicKey:
+    secretId: telnyx-public-key
+    version: 1
+  adminPhone:
+    secretId: admin-phone
+    version: 1
+
+machines:
+  # Allow-list of machine IDs
+  - ny1

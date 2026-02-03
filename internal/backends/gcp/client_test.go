@@ -3,13 +3,28 @@ package gcp
 import (
 	"context"
 	"os"
+	"strconv"
 	"testing"
+
+	"github.com/Applesauce-Labs/key-bringer/internal/core"
 )
 
 func TestFetchSecret(t *testing.T) {
 	projectID := os.Getenv("GCP_PROJECT")
 	if projectID == "" {
 		t.Skip("GCP_PROJECT not set, skipping integration test")
+	}
+	secretID := os.Getenv("GCP_TEST_SECRET_ID")
+	if secretID == "" {
+		t.Skip("GCP_TEST_SECRET_ID not set, skipping integration test")
+	}
+	versionStr := os.Getenv("GCP_TEST_SECRET_VERSION")
+	if versionStr == "" {
+		t.Skip("GCP_TEST_SECRET_VERSION not set, skipping integration test")
+	}
+	version, err := strconv.Atoi(versionStr)
+	if err != nil || version <= 0 {
+		t.Fatalf("invalid GCP_TEST_SECRET_VERSION")
 	}
 
 	ctx := context.Background()
@@ -19,9 +34,7 @@ func TestFetchSecret(t *testing.T) {
 	}
 	defer client.Close()
 
-	// This test requires a secret named "test-secret" to exist in your GCP project
-	// Create it with: echo -n "test-value" | gcloud secrets create test-secret --data-file=-
-	secret, err := client.GetSecret(ctx, "test-secret")
+	secret, err := client.GetSecret(ctx, core.SecretRef{SecretID: secretID, Version: version})
 	if err != nil {
 		t.Fatalf("failed to get secret: %v", err)
 	}
@@ -46,7 +59,7 @@ func TestSecretNotFound(t *testing.T) {
 	}
 	defer client.Close()
 
-	_, err = client.GetSecret(ctx, "nonexistent-secret-that-should-not-exist-12345")
+	_, err = client.GetSecret(ctx, core.SecretRef{SecretID: "nonexistent-secret-that-should-not-exist-12345", Version: 1})
 	if err == nil {
 		t.Error("expected error for nonexistent secret, got nil")
 	}

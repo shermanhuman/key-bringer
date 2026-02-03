@@ -24,23 +24,23 @@ Rules for this tasklist:
 
 ## 1) Config (`.keybringer/config.yaml`)
 
-3. [ ] Implement config schema structs + loader
+3. [x] Implement config schema structs + loader
    - Success: `.keybringer/config.yaml` parses into structs; unknown fields fail closed; required fields validated with actionable errors.
-4. [ ] Test (unit): config parsing/validation
+4. [x] Test (unit): config parsing/validation
    - Cases: missing required fields; unknown field present; invalid version pin (non-integer/zero); malformed YAML.
    - Pass: loader returns errors without leaking secret values.
 
-5. [ ] Define canonical “secret reference” type (secretId + numeric version)
+5. [x] Define canonical “secret reference” type (secretId + numeric version)
    - Success: all secret references in config use a single type; no code path accepts `latest`/alias strings.
-6. [ ] Test (unit): secret reference validation
+6. [x] Test (unit): secret reference validation
    - Cases: version=0; version<0; empty secretId.
    - Pass: errors include context but not secret values.
 
 ## 2) Guardrails (determinism + no secret leakage)
 
-7. [ ] Add hard gate: never allow `versions/latest` anywhere in runtime code paths
+7. [x] Add hard gate: never allow `versions/latest` anywhere in runtime code paths
    - Success: code does not build or tests fail if `versions/latest` is introduced in Go source.
-8. [ ] Test (unit): forbid `versions/latest` string
+8. [x] Test (unit): forbid `versions/latest` string
    - Approach: add a small test that scans Go files under `internal/` (and optionally `cmd/`) and fails if it finds `versions/latest`.
    - Pass: `go test ./...` fails loudly if the forbidden string is present.
 
@@ -51,9 +51,9 @@ Rules for this tasklist:
 
 ## 3) Secret Manager access (deterministic)
 
-11. [ ] Implement GSM client wrapper that only accepts pinned numeric versions
+11. [x] Implement GSM client wrapper that only accepts pinned numeric versions
    - Success: all fetches build resource names using `versions/<number>`; callers cannot request `latest`.
-12. [ ] Test (unit): GSM name construction
+12. [x] Test (unit): GSM name construction
    - Cases: valid secretId/version produces correct resource name; invalid versions rejected.
    - Pass: no network required (pure function tests).
 
@@ -69,10 +69,10 @@ Rules for this tasklist:
 16. [ ] Test (unit): auth middleware logic
    - Approach: inject verifier interface; test “missing token”, “bad token”, “wrong aud” paths.
 
-17. [ ] Retain `X-Agent-Secret` as defense-in-depth (optional but supported by plan)
+17. [x] Retain `X-Agent-Secret` as defense-in-depth (optional but supported by plan)
    - Success: when configured, requests require correct header; header value is fetched from GSM at check time.
    - Note: only enable this in environments where `key-seeker` can provide the header value securely (otherwise keep it unset/disabled).
-18. [ ] Test (unit): agent-secret enforcement
+18. [x] Test (unit): agent-secret enforcement
    - Cases: missing/wrong header rejected; correct header accepted; no secret values logged.
 
 ## 5) Session model (in-memory, metadata-only)
@@ -97,10 +97,11 @@ Rules for this tasklist:
 24. [ ] Test (unit): handler contract
    - Cases: unknown machineId rejected; creates session; triggers SMS send; polling before approval returns “pending”; polling after approval returns key.
 
-25. [ ] Enforce allow-listing by `machineId` from config
+25. [x] Enforce allow-listing by `machineId` from config
    - Success: only machines configured in `.keybringer/config.yaml` can request unlock.
-26. [ ] Test (unit): machine allow-list
+26. [x] Test (unit): machine allow-list
    - Cases: configured machine accepted; missing machine rejected; error does not reveal which IDs exist.
+
 
 27. [ ] Add abuse resistance basics (rate limiting per machineId, lockout for invalid TOTP)
    - Success: repeated bad attempts cause temporary lockout; behavior is deterministic and configurable.

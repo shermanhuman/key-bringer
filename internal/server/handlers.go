@@ -34,8 +34,10 @@ type Handler struct {
 	secretStore     core.SecretStore
 	webhookVerifier *telnyx.WebhookVerifier
 	adminPhone      string
-	zfsKeyName      string
+	zfsMasterKey    core.SecretRef
 	publicURL       string
+	maxPending      time.Duration
+	allowedMachines map[string]struct{}
 
 	webhookTokenCurrent          string
 	webhookTokenPrevious         string
@@ -58,10 +60,25 @@ func NewHandler(
 	secretStore core.SecretStore,
 	webhookVerifier *telnyx.WebhookVerifier,
 	adminPhone string,
-	zfsKeyName string,
+	zfsMasterKey core.SecretRef,
 	publicURL string,
+	maxPendingMinutes int,
+	allowedMachines []string,
 	logger *slog.Logger,
 ) *Handler {
+	allow := make(map[string]struct{}, len(allowedMachines))
+	for _, id := range allowedMachines {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		allow[id] = struct{}{}
+	}
+	maxPending := time.Duration(maxPendingMinutes) * time.Minute
+	if maxPending <= 0 {
+		maxPending = 10 * time.Minute
+	}
+
 	return &Handler{
 		verifier:        verifier,
 		notifier:        notifier,
@@ -69,8 +86,10 @@ func NewHandler(
 		secretStore:     secretStore,
 		webhookVerifier: webhookVerifier,
 		adminPhone:      adminPhone,
-		zfsKeyName:      zfsKeyName,
+		zfsMasterKey:    zfsMasterKey,
 		publicURL:       strings.TrimRight(publicURL, "/"),
+		maxPending:      maxPending,
+		allowedMachines: allow,
 		sessions:        make(map[string]*Session),
 		seenEventIDs:    make(map[string]time.Time),
 		logger:          logger,
@@ -184,13 +203,13 @@ func (h *Handler) rotateWebhookToken(ctx context.Context) (string, error) {
 	return newToken, nil
 }
 
-// UnlockRequest is the request body for POST /api/v1/unlock.
+// UnlockRequest is the request body for POST /unlock.
 type UnlockRequest struct {
 	MachineID string `json:"machine_id"`
 	TOTPCode  string `json:"totp_code"`
 }
 
-// HandleUnlock handles POST /api/v1/unlock.
+// HandleUnlock handles POST /unlock.
 
 func (h *Handler) HandleUnlock(w http.ResponseWriter, r *http.Request) {
 	var req UnlockRequest
@@ -204,6 +223,11 @@ func (h *Handler) HandleUnlock(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "machine_id is required"})
 		return
 	}
+	if _, ok := h.allowedMachines[req.MachineID]; !ok {
+		// Do not reveal allow-list membership.
+		WriteJSON(w, http.StatusForbidden, map[string]string{"error": "unauthorized"})
+		return
+	}
 
 	// If TOTP provided, verify immediately
 	if req.TOTPCode != "" {
@@ -213,7 +237,7 @@ func (h *Handler) HandleUnlock(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Get and return the secret
-		secret, err := h.secretStore.GetSecret(r.Context(), h.zfsKeyName)
+		secret, err := h.secretStore.GetSecret(r.Context(), h.zfsMasterKey)
 		if err != nil {
 			h.logger.Error("failed to get secret", "error", err)
 			WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to retrieve secret"})
@@ -257,22 +281,23 @@ func (h *Handler) HandleUnlock(w http.ResponseWriter, r *http.Request) {
 
 // PollRequest is the request body for POST /api/v1/poll.
 type PollRequest struct {
-	MachineID string `json:"machine_id"`
-	SessionID string `json:"session_id"`
+	MachineID string
+	SessionID string
 }
 
 // HandlePoll handles POST /api/v1/poll.
 
 func (h *Handler) HandlePoll(w http.ResponseWriter, r *http.Request) {
-	var req PollRequest
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
-		return
+	req := PollRequest{
+		MachineID: r.URL.Query().Get("machine_id"),
+		SessionID: r.URL.Query().Get("session_id"),
 	}
 	if strings.TrimSpace(req.SessionID) == "" {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "session_id is required"})
+		return
+	}
+	if strings.TrimSpace(req.MachineID) == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "machine_id is required"})
 		return
 	}
 
@@ -286,7 +311,7 @@ func (h *Handler) HandlePoll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if session expired (10 minute timeout)
-	if time.Since(session.CreatedAt) > 10*time.Minute {
+	if time.Since(session.CreatedAt) > h.maxPending {
 		h.mu.Lock()
 		delete(h.sessions, req.SessionID)
 		h.mu.Unlock()
@@ -300,7 +325,7 @@ func (h *Handler) HandlePoll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Session approved - fetch secret at deliver time and clean up
-	secret, err := h.secretStore.GetSecret(r.Context(), h.zfsKeyName)
+	secret, err := h.secretStore.GetSecret(r.Context(), h.zfsMasterKey)
 	if err != nil {
 		h.logger.Error("failed to get secret for approved session", "error", err)
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to retrieve secret"})

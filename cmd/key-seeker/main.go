@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -55,17 +56,16 @@ func main() {
 		os.Exit(1)
 	}
 	if agentSecret == "" {
-		logger.Error("agent secret required (--secret or AGENT_SECRET)")
-		os.Exit(1)
+		// Optional defense-in-depth.
 	}
 
 	ctx := context.Background()
 
-	// Create HTTP client with Google Cloud authentication
+	// Create HTTP client with Google Cloud authentication (fail closed)
 	httpClient, err := idtoken.NewClient(ctx, serverURL)
 	if err != nil {
-		logger.Warn("failed to create authenticated client, using unauthenticated", "error", err)
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		logger.Error("failed to create authenticated client", "error", err)
+		os.Exit(1)
 	}
 
 	client := &Client{
@@ -155,7 +155,7 @@ func (c *Client) UnlockWithTOTP(ctx context.Context, machineID, totpCode string)
 		"totp_code":  totpCode,
 	}
 
-	resp, err := c.post(ctx, "/api/v1/unlock", body)
+	resp, err := c.post(ctx, "/unlock", body)
 	if err != nil {
 		return "", err
 	}
@@ -187,7 +187,7 @@ func (c *Client) UnlockWithTOTP(ctx context.Context, machineID, totpCode string)
 func (c *Client) UnlockAndPoll(ctx context.Context, machineID string) (string, error) {
 	// Initiate unlock
 	body := map[string]string{"machine_id": machineID}
-	resp, err := c.post(ctx, "/api/v1/unlock", body)
+	resp, err := c.post(ctx, "/unlock", body)
 	if err != nil {
 		return "", err
 	}
@@ -216,10 +216,10 @@ func (c *Client) UnlockAndPoll(ctx context.Context, machineID string) (string, e
 	c.logger.Info("SMS sent, waiting for TOTP response...", "session_id", initResp.SessionID)
 
 	// Poll every 5 seconds for up to 10 minutes
-	pollBody := map[string]string{
-		"machine_id": machineID,
-		"session_id": initResp.SessionID,
-	}
+	q := url.Values{}
+	q.Set("machine_id", machineID)
+	q.Set("session_id", initResp.SessionID)
+	pollURL := c.serverURL + "/poll?" + q.Encode()
 
 	const pollTimeout = 10 * time.Minute
 	startTime := time.Now()
@@ -256,7 +256,15 @@ func (c *Client) UnlockAndPoll(ctx context.Context, machineID string) (string, e
 			// Update elapsed time on spinner
 			spinner.SetElapsed(time.Since(startTime))
 
-			resp, err := c.post(ctx, "/api/v1/poll", pollBody)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
+			if err != nil {
+				c.logger.Warn("poll build failed", "error", err)
+				continue
+			}
+			if c.agentSecret != "" {
+				req.Header.Set("X-Agent-Secret", c.agentSecret)
+			}
+			resp, err := c.httpClient.Do(req)
 			if err != nil {
 				c.logger.Warn("poll failed", "error", err)
 				continue
@@ -289,7 +297,9 @@ func (c *Client) post(ctx context.Context, path string, body map[string]string) 
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Agent-Secret", c.agentSecret)
+	if c.agentSecret != "" {
+		req.Header.Set("X-Agent-Secret", c.agentSecret)
+	}
 
 	return c.httpClient.Do(req)
 }

@@ -23,7 +23,7 @@ func (fakeNotifier) SendSMS(context.Context, string, string) error { return nil 
 
 type fakeSecretStore struct{}
 
-func (fakeSecretStore) GetSecret(context.Context, string) (string, error) { return "FAKE_SECRET", nil }
+func (fakeSecretStore) GetSecret(context.Context, core.SecretRef) (string, error) { return "FAKE_SECRET", nil }
 
 type fakeWebhookUpdater struct {
 	calls   int
@@ -49,8 +49,10 @@ func TestWebhookTokenRotationOverlap(t *testing.T) {
 		fakeSecretStore{},
 		&telnyx.WebhookVerifier{},
 		"+15555550123",
-		"zfs-master-key",
+		core.SecretRef{SecretID: "zfs-master-key", Version: 1},
 		"http://invalid",
+		10,
+		[]string{"ny1"},
 		logger,
 	)
 

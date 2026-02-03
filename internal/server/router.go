@@ -10,10 +10,14 @@ import (
 
 // Config holds server configuration.
 type Config struct {
-	AgentSecret string
-	AdminPhone  string
-	ZFSKeyName  string
-	PublicURL   string
+	RequireIAMAuth     bool
+	IAMAudience        string
+	AgentSecretRef     *core.SecretRef
+	AdminPhone         string
+	ZFSMasterKey       core.SecretRef
+	PublicURL          string
+	MaxPendingMinutes  int
+	AllowedMachines    []string
 }
 
 // NewRouter creates a new stdlib router with all routes configured.
@@ -35,14 +39,28 @@ func NewRouter(
 		secretStore,
 		webhookVerifier,
 		cfg.AdminPhone,
-		cfg.ZFSKeyName,
+		cfg.ZFSMasterKey,
 		cfg.PublicURL,
+		cfg.MaxPendingMinutes,
+		cfg.AllowedMachines,
 		logger,
 	)
 
-	// API routes (require agent auth)
-	mux.Handle("POST /api/v1/unlock", AuthMiddleware(cfg.AgentSecret, http.HandlerFunc(handler.HandleUnlock)))
-	mux.Handle("POST /api/v1/poll", AuthMiddleware(cfg.AgentSecret, http.HandlerFunc(handler.HandlePoll)))
+	// Protected API routes.
+	var unlockHandler http.Handler = http.HandlerFunc(handler.HandleUnlock)
+	var pollHandler http.Handler = http.HandlerFunc(handler.HandlePoll)
+
+	if cfg.RequireIAMAuth {
+		unlockHandler = RequireIDToken(cfg.IAMAudience, unlockHandler)
+		pollHandler = RequireIDToken(cfg.IAMAudience, pollHandler)
+	}
+	if cfg.AgentSecretRef != nil {
+		unlockHandler = RequireAgentSecret(secretStore, *cfg.AgentSecretRef, unlockHandler)
+		pollHandler = RequireAgentSecret(secretStore, *cfg.AgentSecretRef, pollHandler)
+	}
+
+	mux.Handle("POST /unlock", unlockHandler)
+	mux.Handle("GET /poll", pollHandler)
 
 	// Webhook routes (authenticated via signature)
 	mux.HandleFunc("GET /webhooks/telnyx/{token}", handler.HandleWebhookProbe)

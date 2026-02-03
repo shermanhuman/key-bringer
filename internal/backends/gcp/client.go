@@ -6,6 +6,7 @@ import (
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	"github.com/Applesauce-Labs/key-bringer/internal/core"
 )
 
 // Client implements core.SecretStore using Google Secret Manager.
@@ -27,10 +28,16 @@ func NewClient(ctx context.Context, projectID string) (*Client, error) {
 	}, nil
 }
 
-// GetSecret retrieves the latest version of a secret by name.
-func (c *Client) GetSecret(ctx context.Context, name string) (string, error) {
-	// Build the resource name
-	resourceName := fmt.Sprintf("projects/%s/secrets/%s/versions/latest", c.projectID, name)
+// GetSecret retrieves a pinned numeric version of a secret.
+func (c *Client) GetSecret(ctx context.Context, ref core.SecretRef) (string, error) {
+	if err := ref.Validate(); err != nil {
+		return "", fmt.Errorf("gsm: invalid secret ref: %w", err)
+	}
+
+	resourceName, err := secretVersionName(c.projectID, ref)
+	if err != nil {
+		return "", err
+	}
 
 	req := &secretmanagerpb.AccessSecretVersionRequest{
 		Name: resourceName,
@@ -38,10 +45,20 @@ func (c *Client) GetSecret(ctx context.Context, name string) (string, error) {
 
 	result, err := c.client.AccessSecretVersion(ctx, req)
 	if err != nil {
-		return "", fmt.Errorf("gsm: failed to access secret %q: %w", name, err)
+		return "", fmt.Errorf("gsm: failed to access secret %q v%d: %w", ref.SecretID, ref.Version, err)
 	}
 
 	return string(result.Payload.Data), nil
+}
+
+func secretVersionName(projectID string, ref core.SecretRef) (string, error) {
+	if err := ref.Validate(); err != nil {
+		return "", fmt.Errorf("gsm: invalid secret ref: %w", err)
+	}
+	if projectID == "" {
+		return "", fmt.Errorf("gsm: projectID is required")
+	}
+	return fmt.Sprintf("projects/%s/secrets/%s/versions/%d", projectID, ref.SecretID, ref.Version), nil
 }
 
 // Close closes the underlying gRPC connection.
