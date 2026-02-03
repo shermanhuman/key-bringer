@@ -105,6 +105,10 @@ This outputs:
 - Base32 secret for GCP Secret Manager
 - QR code to scan with your authenticator app
 
+Security note:
+
+- Treat the TOTP seed like a password. Don’t paste it into docs, issues, or logs.
+
 ### Create Secrets
 
 | Secret Name          | Value                                   |
@@ -118,13 +122,25 @@ This outputs:
 | `admin-phone`        | Your mobile number (`+1...`)            |
 
 ```bash
-echo -n "your-passphrase" | gcloud secrets create zfs-master-key --data-file=-
-echo -n "random-secret" | gcloud secrets create agent-secret --data-file=-
-echo -n "YOUR_TOTP_SECRET" | gcloud secrets create totp-seed --data-file=-
-echo -n "KEY..." | gcloud secrets create telnyx-api-key --data-file=-
-echo -n "+15551234567" | gcloud secrets create telnyx-from-number --data-file=-
-echo -n "public-key" | gcloud secrets create telnyx-public-key --data-file=-
-echo -n "+15559876543" | gcloud secrets create admin-phone --data-file=-
+# Create secret containers (no values yet)
+gcloud secrets create zfs-master-key --replication-policy="automatic"
+gcloud secrets create agent-secret --replication-policy="automatic"
+gcloud secrets create totp-seed --replication-policy="automatic"
+gcloud secrets create telnyx-api-key --replication-policy="automatic"
+gcloud secrets create telnyx-from-number --replication-policy="automatic"
+gcloud secrets create telnyx-public-key --replication-policy="automatic"
+gcloud secrets create admin-phone --replication-policy="automatic"
+
+# Add secret versions by pasting values to stdin (avoids putting secrets in your shell history)
+gcloud secrets versions add zfs-master-key --data-file=-
+gcloud secrets versions add agent-secret --data-file=-
+gcloud secrets versions add totp-seed --data-file=-
+gcloud secrets versions add telnyx-api-key --data-file=-
+gcloud secrets versions add telnyx-from-number --data-file=-
+gcloud secrets versions add telnyx-public-key --data-file=-
+gcloud secrets versions add admin-phone --data-file=-
+
+# Important: pin numeric versions in config; do not use aliases like "latest".
 ```
 
 ---
@@ -138,8 +154,10 @@ echo -n "+15559876543" | gcloud secrets create admin-phone --data-file=-
    - **Allowed Destinations**: Check your country
 3. **Associate Number**: Link your number to the Messaging Profile
 4. **Get Credentials**:
-   - API Key: Account Settings → API Keys
+  - API Key: https://portal.telnyx.com/#/api-keys
    - Public Key: Account Settings (for webhook verification)
+
+Tip: keep the Telnyx portal handy: https://portal.telnyx.com/
 
 ---
 
@@ -155,16 +173,11 @@ After deployment, get your service URL:
 gcloud run services describe key-bringer --region=us-central1 --format="value(status.url)"
 ```
 
-Make it publicly accessible:
+Security note:
 
-```bash
-gcloud run services add-iam-policy-binding key-bringer \
-  --region=us-central1 \
-  --member="allUsers" \
-  --role="roles/run.invoker"
-```
-
-> **Note:** If you're in a Google Workspace organization, you may need to modify the `iam.allowedPolicyMemberDomains` org policy to allow `allUsers`. See Troubleshooting section.
+- The Telnyx webhook must be reachable by Telnyx.
+- Telnyx cannot use Cloud Run IAM.
+- Keep secret-delivering endpoints protected at the application layer (ID token auth) and keep the webhook protected by signature verification + replay protection.
 
 ### Rate Limiting (recommended)
 
@@ -182,6 +195,15 @@ gcloud run services update key-bringer \
 Set a $10 budget alert in Cloud Console: Billing → Budgets & alerts → Create Budget.
 
 **Update Telnyx webhook** with your Cloud Run URL + `/webhooks/telnyx`.
+
+### Verification run (recommended)
+
+Do a quick end-to-end test while you still have context loaded and can fix mistakes fast:
+
+1. Start a test unlock (`key-seeker --monitor` on a test machineId).
+2. Confirm you receive the SMS.
+3. Reply with `APPROVE <machineId> <totp>`.
+4. Confirm the poll completes and ZFS unlock succeeds.
 
 ---
 
@@ -210,7 +232,7 @@ Create `/etc/key-seeker/env`:
 ```ini
 SERVER_URL=https://key-bringer-xxxx.a.run.app
 MACHINE_ID=myserver
-AGENT_SECRET=<same-as-gcp-secret>
+AGENT_SECRET=OPTIONAL_DEFENSE_IN_DEPTH
 ZFS_DATASET=zroot/encrypted
 ```
 

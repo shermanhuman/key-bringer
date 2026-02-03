@@ -8,7 +8,7 @@ description: Go development guidelines for key-bringer project
 
 - **Go**: 1.25.6 (latest stable, Jan 2026)
 - **CLI**: `github.com/spf13/cobra` (for `key-bringer` and `key-seeker`)
-- **HTTP**: `github.com/gin-gonic/gin` v1.10+
+- **HTTP**: standard library `net/http` + `http.ServeMux` (Go 1.22+ patterns)
 - **TOTP**: `github.com/pquerna/otp` v1.4+
 - **GCP**: `cloud.google.com/go/secretmanager` v1.14+
 - **Telnyx**: `github.com/team-telnyx/telnyx-go` v3+

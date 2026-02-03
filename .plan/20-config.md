@@ -35,12 +35,18 @@
 - `runtime`:
   - `requireIamAuth`: true
   - `maxPendingMinutes`: 10
+    - Source of truth for SessionStore TTL (and any other short-lived best-effort state like webhook event-id deduplication).
 
 ## Environment variables
 
 - Environment variables remain acceptable for Cloud Run wiring (non-secret config).
 - Secret values should be fetched via GSM API at runtime.
 - Avoid wiring secrets to env vars via `--set-secrets` with `:latest`.
+
+Webhook path tokens:
+
+- For per-unlock-session rotation, webhook path tokens are generated at runtime and kept only in memory (current + previous overlap window).
+- If a static/fixed token is supported for manual rotation, treat it as a secret: store in GSM with a pinned numeric version and fetch at runtime.
 
 ## Version pinning policy
 

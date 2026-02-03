@@ -29,6 +29,27 @@ This is a lightweight system; v1 deliberately avoids additional infrastructure.
 Rationale: the only state we need is short-lived “pending approval” state during an unlock window.
 If Cloud Run restarts, the operator can retry.
 
+Default unlock window (v1):
+
+- SessionStore TTL comes from config `runtime.maxPendingMinutes` (default 10 minutes).
+
+## HTTP stack decision (v1)
+
+Use the Go standard library HTTP stack:
+
+- Router: `net/http` `http.ServeMux` (Go 1.22+ patterns).
+- Server: `http.Server` with explicit timeouts and request body size limits.
+
+Deliberate non-choice:
+
+- Do **not** introduce a web framework (Gin, Echo, Chi, etc.) in v1.
+
+Rationale:
+
+- Small API surface area (a handful of endpoints) doesn’t justify the dependency surface.
+- Raw request body handling must be explicit for Telnyx signature verification.
+- Fewer defaults makes “never log secrets” and “fail closed” easier to enforce and test.
+
 ## Session/state decision (no Redis)
 
 We still keep a **small session abstraction**, but it is intentionally implemented as in-memory only in v1.
@@ -42,6 +63,11 @@ Security note:
 - Do not store the secret value inside the session.
 - Sessions store only metadata: `machine_id`, timestamps, approval state.
 - When the session is approved and the client polls, fetch the unlock key from GSM *at that moment*.
+
+## SMS challenge flow (v1)
+
+- `POST /unlock` creates a pending session and sends an SMS challenge to the configured admin phone.
+- Admin replies via SMS (delivered to the Telnyx webhook) with `machineId` + TOTP to approve.
 
 ## GCP setup (operator workflow)
 
