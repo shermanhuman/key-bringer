@@ -55,3 +55,17 @@ Webhook path tokens:
   - create a new GSM version
   - update `.keybringer/config.yaml` to point at the new version
   - redeploy
+  - validate the new secret works
+  - optionally disable old GSM version after grace period
+
+## Secrets Rotation Schedule
+
+See [60-security.md](60-security.md#secrets-rotation-schedule-planned) for comprehensive rotation timing recommendations and procedures.
+
+Quick reference:
+- **ZFS Master Key**: On compromise/decommission only
+- **TOTP Seed**: Annually or on compromise
+- **Telnyx API Key**: Every 90 days
+- **Agent Secret**: Every 180 days
+- **Webhook Path Token**: Per unlock session (automatic)
+- **Telnyx Public Key**: When Telnyx rotates (monitor release notes)

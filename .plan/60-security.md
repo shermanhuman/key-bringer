@@ -73,6 +73,12 @@ This ensures each unlock session uses a fresh endpoint, minimizing exposure wind
 - Track `WEBHOOK_PATH_TOKEN_PREVIOUS` and `WEBHOOK_PATH_TOKEN_PREVIOUS_VALID_UNTIL` (Unix timestamp).
 - After the grace window expires, reject the previous token.
 
+**Observed rotation timing (validated 2026-02-02):**
+
+- Telnyx messaging profile `webhook_url` API update: ~300-600ms (API call latency)
+- Propagation delay: ~7-10 seconds (time until first webhook delivery hits new endpoint)
+- Recommended overlap window: 60 seconds (provides safety margin for retries + concurrent unlocks)
+
 Operational note:
 
 - Per-session rotation changes the messaging profile webhook destination. This is only appropriate when you control the whole flow (single-user v1) and you fail closed on update/test errors.
@@ -105,3 +111,66 @@ Operational note:
 
 - Telnyx retries deliveries if the endpoint does not return `2xx` within ~2 seconds.
 	- Prefer verifying + acknowledging quickly, then doing slower work after.
+
+## Secrets Rotation Schedule (Planned)
+
+Establish a rotation schedule for all cryptographic material and credentials. Rotation creates new GSM secret versions and updates `.keybringer/config.yaml` to pin the new version.
+
+### Rotation Timing Recommendations
+
+**ZFS Master Key:**
+- **Frequency**: On compromise or host decommission only (not routine)
+- **Rationale**: High-impact change (requires re-encrypting ZFS dataset or migrating data); rotate only when necessary
+- **Procedure**: Create new GSM version → update config → redeploy → re-key ZFS (or migrate data to new encrypted dataset)
+
+**TOTP Seed:**
+- **Frequency**: Annually or on compromise
+- **Rationale**: TOTP seed compromise allows attacker to generate valid codes; annual rotation limits exposure window
+- **Procedure**: Generate new seed → create GSM version → update config → redeploy → operator re-enrolls in authenticator app (scan new QR code)
+- **Caution**: Coordinate with operator (requires re-enrollment); consider doing during maintenance window
+
+**Telnyx API Key:**
+- **Frequency**: Every 90 days or on compromise
+- **Rationale**: API key grants control over messaging profile and incurs costs; regular rotation limits blast radius
+- **Procedure**: Generate new key in Telnyx portal → create GSM version → update config → redeploy → revoke old key after validation
+
+**Agent Secret (if used):**
+- **Frequency**: Every 180 days or on suspected host compromise
+- **Rationale**: Defense-in-depth credential; less critical than IAM tokens but should still be rotated
+- **Procedure**: Generate new secret → create GSM version → update config → redeploy server → update `key-seeker` on all hosts → validate → revoke old secret
+
+**Webhook Path Token:**
+- **Frequency**: Per unlock session (automatic) OR on incident (manual)
+- **Rationale**: Ephemeral token rotated automatically; manual rotation if suspicious traffic detected
+- **Procedure**: Automatic (part of unlock flow) or manual via operator command
+
+**Telnyx Public Key (webhook verification):**
+- **Frequency**: Only when Telnyx rotates their signing key (monitor Telnyx release notes)
+- **Rationale**: Telnyx controls this key; update when they publish new key
+- **Procedure**: Obtain new public key from Telnyx → create GSM version → update config → redeploy
+
+### Rotation Procedure (General)
+
+1. Generate/obtain new secret value (never via command line; use stdin or secure generation)
+2. Create new GSM secret version:
+   ```bash
+   echo -n "new-secret-value" | gcloud secrets versions add SECRET_NAME --data-file=-
+   ```
+3. Note the new version number (e.g., `2`)
+4. Update `.keybringer/config.yaml` to pin new version
+5. Commit config change (no secrets in commit)
+6. Redeploy Cloud Run service
+7. Validate new secret works (run `key-bringer doctor --verify` or targeted test)
+8. Document rotation in changelog/audit log
+9. (Optional) Disable old GSM secret version after grace period
+
+### Emergency Rotation (Compromise Response)
+
+If a secret is compromised:
+
+1. Immediately rotate the compromised secret (follow procedure above)
+2. Review Cloud Run logs and GSM audit logs for unauthorized access
+3. Identify what data/systems were exposed
+4. If ZFS key or TOTP seed compromised: consider rotating all secrets and re-evaluating trust boundaries
+5. If webhook token compromised: automatic per-session rotation limits damage; monitor for unusual traffic
+6. Document incident and lessons learned
